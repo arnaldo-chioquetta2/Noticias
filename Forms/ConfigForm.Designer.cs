@@ -21,9 +21,10 @@ namespace NewsImpactRanker.WinForms.Forms
             this.btnCancel = new System.Windows.Forms.Button();
             this.label2 = new System.Windows.Forms.Label();
             this.txtModel = new System.Windows.Forms.TextBox();
+            this.txModeloGrog = new System.Windows.Forms.TextBox();
             this.label3 = new System.Windows.Forms.Label();
-            this.txtNewsFile = new System.Windows.Forms.TextBox();
-            this.btnBrowse = new System.Windows.Forms.Button();
+            this.txApiGrog = new System.Windows.Forms.TextBox();
+            this.label4 = new System.Windows.Forms.Label();
             this.SuspendLayout();
             // 
             // label1
@@ -44,7 +45,7 @@ namespace NewsImpactRanker.WinForms.Forms
             // 
             // btnSave
             // 
-            this.btnSave.Location = new System.Drawing.Point(230, 165);
+            this.btnSave.Location = new System.Drawing.Point(12, 205);
             this.btnSave.Name = "btnSave";
             this.btnSave.Size = new System.Drawing.Size(75, 23);
             this.btnSave.TabIndex = 2;
@@ -55,7 +56,7 @@ namespace NewsImpactRanker.WinForms.Forms
             // btnCancel
             // 
             this.btnCancel.DialogResult = System.Windows.Forms.DialogResult.Cancel;
-            this.btnCancel.Location = new System.Drawing.Point(315, 165);
+            this.btnCancel.Location = new System.Drawing.Point(296, 205);
             this.btnCancel.Name = "btnCancel";
             this.btnCancel.Size = new System.Drawing.Size(75, 23);
             this.btnCancel.TabIndex = 3;
@@ -68,9 +69,9 @@ namespace NewsImpactRanker.WinForms.Forms
             this.label2.AutoSize = true;
             this.label2.Location = new System.Drawing.Point(12, 60);
             this.label2.Name = "label2";
-            this.label2.Size = new System.Drawing.Size(45, 13);
+            this.label2.Size = new System.Drawing.Size(77, 13);
             this.label2.TabIndex = 4;
-            this.label2.Text = "Modelo:";
+            this.label2.Text = "Modelo Gemini";
             // 
             // txtModel
             // 
@@ -79,29 +80,37 @@ namespace NewsImpactRanker.WinForms.Forms
             this.txtModel.Size = new System.Drawing.Size(360, 20);
             this.txtModel.TabIndex = 5;
             // 
+            // txModeloGrog
+            // 
+            this.txModeloGrog.Location = new System.Drawing.Point(12, 169);
+            this.txModeloGrog.Name = "txModeloGrog";
+            this.txModeloGrog.Size = new System.Drawing.Size(360, 20);
+            this.txModeloGrog.TabIndex = 9;
+            // 
             // label3
             // 
             this.label3.AutoSize = true;
-            this.label3.Location = new System.Drawing.Point(12, 110);
+            this.label3.Location = new System.Drawing.Point(12, 153);
             this.label3.Name = "label3";
-            this.label3.Size = new System.Drawing.Size(102, 13);
-            this.label3.TabIndex = 6;
-            this.label3.Text = "Arquivo de notícias:";
+            this.label3.Size = new System.Drawing.Size(77, 13);
+            this.label3.TabIndex = 8;
+            this.label3.Text = "Modelo Gemini";
             // 
-            // txtNewsFile
+            // txApiGrog
             // 
-            this.txtNewsFile.Location = new System.Drawing.Point(12, 126);
-            this.txtNewsFile.Name = "txtNewsFile";
-            this.txtNewsFile.Size = new System.Drawing.Size(300, 20);
-            this.txtNewsFile.TabIndex = 7;
+            this.txApiGrog.Location = new System.Drawing.Point(12, 124);
+            this.txApiGrog.Name = "txApiGrog";
+            this.txApiGrog.Size = new System.Drawing.Size(360, 20);
+            this.txApiGrog.TabIndex = 7;
             // 
-            // btnBrowse
+            // label4
             // 
-            this.btnBrowse.Location = new System.Drawing.Point(318, 124);
-            this.btnBrowse.Name = "btnBrowse";
-            this.btnBrowse.Size = new System.Drawing.Size(75, 23);
-            this.btnBrowse.TabIndex = 8;
-            this.btnBrowse.Text = "Selecionar";
+            this.label4.AutoSize = true;
+            this.label4.Location = new System.Drawing.Point(12, 108);
+            this.label4.Name = "label4";
+            this.label4.Size = new System.Drawing.Size(99, 13);
+            this.label4.TabIndex = 6;
+            this.label4.Text = "Chave da API Grog";
             // 
             // ConfigForm
             // 
@@ -109,16 +118,17 @@ namespace NewsImpactRanker.WinForms.Forms
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.CancelButton = this.btnCancel;
-            this.ClientSize = new System.Drawing.Size(420, 210);
+            this.ClientSize = new System.Drawing.Size(392, 243);
+            this.Controls.Add(this.txModeloGrog);
+            this.Controls.Add(this.label3);
+            this.Controls.Add(this.txApiGrog);
+            this.Controls.Add(this.label4);
             this.Controls.Add(this.txtModel);
             this.Controls.Add(this.label2);
             this.Controls.Add(this.btnCancel);
             this.Controls.Add(this.btnSave);
             this.Controls.Add(this.txtApiKey);
             this.Controls.Add(this.label1);
-            this.Controls.Add(this.label3);
-            this.Controls.Add(this.txtNewsFile);
-            this.Controls.Add(this.btnBrowse);
             this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
             this.MaximizeBox = false;
             this.MinimizeBox = false;
@@ -137,9 +147,9 @@ namespace NewsImpactRanker.WinForms.Forms
         private System.Windows.Forms.Button btnCancel;
         private System.Windows.Forms.Label label2;
         private System.Windows.Forms.TextBox txtModel;
-
+        private System.Windows.Forms.TextBox txModeloGrog;
         private System.Windows.Forms.Label label3;
-        private System.Windows.Forms.TextBox txtNewsFile;
-        private System.Windows.Forms.Button btnBrowse;
+        private System.Windows.Forms.TextBox txApiGrog;
+        private System.Windows.Forms.Label label4;
     }
 }

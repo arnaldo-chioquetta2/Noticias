@@ -12,22 +12,24 @@ using NewsImpactRanker.WinForms.Utils;
 using NewsImpactRanker.WinForms.Models;
 using NewsImpactRanker.WinForms.Storage;
 using NewsImpactRanker.WinForms.Services;
-// using static System.Net.Mime.MediaTypeNames;
 
 namespace NewsImpactRanker.WinForms.Forms
 {
     public partial class MainForm : Form
     {
         private readonly ScrapingService _scrapingService;
-        // private readonly GeminiService _groqService;
         private readonly GroqService _groqService;
         private CancellationTokenSource _cts;
-        private bool _limitToFive = true;   // 🔥 mude para false quando quiser liberar geral
+        private bool _limitToFive = false;   // 🔥 mude para false quando quiser liberar geral
         private bool _currentExecutionUsesFile = false;
-
-        // ✅ NOVO: Lista para rastrear falhas de scraping por domínio
         private readonly List<string> _failedDomains = new List<string>();
         private readonly object _failedDomainsLock = new object();
+
+        // --- Controle de Load Balancing e Failover IA ---
+        private DateTime _groqCooldownUntil = DateTime.MinValue;
+        private int _groqSuccessCount = 0;
+        private int _geminiSuccessCount = 0;
+        private readonly GeminiService _geminiService;
 
         public MainForm()
         {
@@ -35,6 +37,7 @@ namespace NewsImpactRanker.WinForms.Forms
             _scrapingService = new ScrapingService();
             // _geminiService = new GeminiService();
             _groqService = new GroqService();
+            _geminiService = new GeminiService();
 
             dgvResults.SortCompare += DgvResults_SortCompare;
 
@@ -68,18 +71,18 @@ namespace NewsImpactRanker.WinForms.Forms
         {
             var config = StorageManager.LoadConfig();
 
-            if (string.IsNullOrEmpty(config.AiApiKey))
-            {
-                MessageBox.Show("Configure a API Key antes de iniciar.",
-                    "Aviso",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning);
+            //if (string.IsNullOrEmpty(config.AiApiKey))
+            //{
+            //    MessageBox.Show("Configure a API Key antes de iniciar.",
+            //        "Aviso",
+            //        MessageBoxButtons.OK,
+            //        MessageBoxIcon.Warning);
 
-                btnConfig_Click(null, null);
-                return;
-            }
+            //    btnConfig_Click(null, null);
+            //    return;
+            //}
 
-            List<string> validUrls;
+            List<string> validUrls=null;
             bool usingFile = false;
 
             // 🔹 1️⃣ Verificar se há URLs digitadas
@@ -98,35 +101,35 @@ namespace NewsImpactRanker.WinForms.Forms
 
                 LogService.Info("Modo: URLs digitadas manualmente");
             }
-            else
-            {
-                // 🔹 2️⃣ Caso contrário usar arquivo configurado
-                if (string.IsNullOrWhiteSpace(config.NewsFilePath) ||
-                    !File.Exists(config.NewsFilePath))
-                {
-                    MessageBox.Show("Configure o arquivo de notícias nas Configurações.",
-                        "Aviso",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Warning);
+            //else
+            //{
+            //    // 🔹 2️⃣ Caso contrário usar arquivo configurado
+            //    if (string.IsNullOrWhiteSpace(config.NewsFilePath) ||
+            //        !File.Exists(config.NewsFilePath))
+            //    {
+            //        MessageBox.Show("Configure o arquivo de notícias nas Configurações.",
+            //            "Aviso",
+            //            MessageBoxButtons.OK,
+            //            MessageBoxIcon.Warning);
 
-                    btnConfig_Click(null, null);
-                    return;
-                }
+            //        btnConfig_Click(null, null);
+            //        return;
+            //    }
 
-                validUrls = File.ReadAllLines(config.NewsFilePath)
-                    .Select(l => l.Trim())
-                    .Where(l => UrlValidator.IsValid(l))
-                    .Distinct()
-                    .ToList();
+            //    validUrls = File.ReadAllLines(config.NewsFilePath)
+            //        .Select(l => l.Trim())
+            //        .Where(l => UrlValidator.IsValid(l))
+            //        .Distinct()
+            //        .ToList();
 
-                if (_limitToFive)
-                    validUrls = validUrls.Take(5).ToList();
+            //    if (_limitToFive)
+            //        validUrls = validUrls.Take(5).ToList();
 
-                usingFile = true;
+            //    usingFile = true;
 
-                LogService.Info("Modo: Arquivo configurado");
-                LogService.Info($"Arquivo: {config.NewsFilePath}");
-            }
+            //    LogService.Info("Modo: Arquivo configurado");
+            //    LogService.Info($"Arquivo: {config.NewsFilePath}");
+            //}
 
             if (validUrls.Count == 0)
             {
@@ -267,7 +270,7 @@ namespace NewsImpactRanker.WinForms.Forms
                 int requestsLast24h = TokenUsageService.GetLast24hRequests();
 
                 fileContent.Add("=== CONSUMO API ===");
-                fileContent.Add($"Execução atual: {GroqService.GetTotalTokensToday()} tokens");
+                // fileContent.Add($"Execução atual: {GroqService.GetTotalTokensToday()} tokens");
                 fileContent.Add($"Últimas 24h: {tokensLast24h} tokens");
                 fileContent.Add($"Requests últimas 24h: {requestsLast24h}");
                 fileContent.Add("");
@@ -311,6 +314,9 @@ namespace NewsImpactRanker.WinForms.Forms
         {
             try
             {
+                // 0. Carregar configuração (Resolve o erro: O nome 'config' não existe)
+                var config = StorageManager.LoadConfig();
+
                 // 1. Scraping
                 var item = await _scrapingService.ScrapeAsync(url);
 
@@ -339,74 +345,61 @@ namespace NewsImpactRanker.WinForms.Forms
                         return;
                     }
 
-                    LogService.Info($"🧾 URL atual: {url}"); // passe a url pra este método ou logue no caller
+                    LogService.Info($"🧾 URL atual: {url}");
 
-                    // 3. Gemini - Classificação por IA
-                    try
+                    // 3. Motor de IA - Load Balancing & Failover (Groq como principal, Gemini como sombra)
+                    // Não chamamos mais o _groqService diretamente aqui para permitir o fallback automático
+                    var analysis = await ExecuteAiWithFailoverAsync(item.RawText, config);
+
+                    if (analysis != null)
                     {
-                        // ✅ Chamada corrigida: sem CancellationToken (removido para simplificar)
-                        var analysis = await _groqService.ClassifyNewsAsync(item.RawText);
-
-                        // ✅ Preencher dados da classificação
-                        item.ImpactScore = analysis.impactScore;
-                        item.ImpactReason = analysis.impactReason;
-                        item.Category = analysis.category;
-                        item.Status = "Sucesso"; // ✅ Garantir status correto após classificação
+                        // ✅ Preencher dados da classificação vindos do orquestrador
+                        item.ImpactScore = analysis.ImpactScore;
+                        item.ImpactReason = analysis.ImpactReason;
+                        item.Category = analysis.Category;
+                        item.Status = "Sucesso";
 
                         // ✅ Salvar no cache para reutilização futura
                         CacheService.Save(item);
 
-                        LogService.Info($"Classificação concluída para {url}: Score={analysis.impactScore}, Categoria={analysis.category}");
+                        LogService.Info($"Classificação concluída para {url}: Score={item.ImpactScore}, Categoria={item.Category}");
                     }
-                    catch (Exception ex) when (ex.Message.Contains("429") || ex.Message.Contains("RESOURCE_EXHAUSTED"))
+                    else
                     {
-                        // ✅ Tratamento específico para rate limit da API Gemini
-                        item.Status = "Limite API";
-                        LogService.Warn($"Rate limit Gemini para {url}. Tente novamente mais tarde.");
-                    }
-                    catch (Exception ex)
-                    {
-                        // ✅ Tratamento para outros erros da API Gemini
-                        item.Status = "Erro Gemini";
-                        LogService.Error($"Erro Gemini para {url}", ex);
+                        // Se o orquestrador retornar null, significa que ambas as IAs falharam (ou rate limit total)
+                        item.Status = "Erro IA Total";
+                        LogService.Error($"Falha crítica: Groq e Gemini falharam para a URL {url}");
                     }
                 }
 
                 // ✅ Adicionar item ao DataGridView (sucesso ou falha)
+                // A Grid permanece intacta, aceitando o item independente do resultado
                 AddOrUpdateGrid(item);
             }
             catch (Exception ex) when (ex.Message.Contains("conjunto de caracteres") || ex.Message.Contains("charset"))
             {
-                // ✅ Tratamento específico para erro de charset no scraping
                 LogService.Warn($"Erro de charset ao processar {url}. Tentando fallback...");
-
-                string domain = ExtractDomain(url);
-                lock (_failedDomainsLock)
-                {
-                    if (!_failedDomains.Contains(domain))
-                    {
-                        _failedDomains.Add(domain);
-                    }
-                }
-
+                RegistrarFalhaDominio(url);
                 AddOrUpdateGrid(new NewsItem { Url = url, Status = "Erro Charset", ProcessedAt = DateTime.Now });
             }
             catch (Exception ex)
             {
-                // ✅ Tratamento para erros genéricos no processamento
                 LogService.Error($"Erro ao processar URL {url}", ex);
-
-                // ✅ Rastrear falha genérica por domínio
-                string domain = ExtractDomain(url);
-                lock (_failedDomainsLock)
-                {
-                    if (!_failedDomains.Contains(domain))
-                    {
-                        _failedDomains.Add(domain);
-                    }
-                }
-
+                RegistrarFalhaDominio(url);
                 AddOrUpdateGrid(new NewsItem { Url = url, Status = "Erro", ProcessedAt = DateTime.Now });
+            }
+        }
+
+        // Método auxiliar para evitar repetição de código no rastreamento de falhas
+        private void RegistrarFalhaDominio(string url)
+        {
+            string domain = ExtractDomain(url);
+            lock (_failedDomainsLock)
+            {
+                if (!_failedDomains.Contains(domain))
+                {
+                    _failedDomains.Add(domain);
+                }
             }
         }
 
@@ -564,7 +557,7 @@ namespace NewsImpactRanker.WinForms.Forms
                         cell.Style.ForeColor = Color.Green;
 
                         // ✅ REMOVER A URL DO ARQUIVO (mas NÃO remove do grid)
-                        RemoveUrlFromConfiguredFile(url);
+                        //RemoveUrlFromConfiguredFile(url);
 
                         // ✅ MARCAR A LINHA COM LARANJA FRACO (permanente)
                         row.DefaultCellStyle.BackColor = Color.FromArgb(255, 235, 200); // laranja fraco
@@ -613,31 +606,31 @@ namespace NewsImpactRanker.WinForms.Forms
             }
         }
 
-        private void RemoveUrlFromConfiguredFile(string url)
-{
-    try
-    {
-        var config = StorageManager.LoadConfig();
+//        private void RemoveUrlFromConfiguredFile(string url)
+//{
+//    try
+//    {
+//        var config = StorageManager.LoadConfig();
 
-        if (string.IsNullOrWhiteSpace(config.NewsFilePath) ||
-            !File.Exists(config.NewsFilePath))
-            return;
+//        if (string.IsNullOrWhiteSpace(config.NewsFilePath) ||
+//            !File.Exists(config.NewsFilePath))
+//            return;
 
-        var lines = File.ReadAllLines(config.NewsFilePath).ToList();
+//        var lines = File.ReadAllLines(config.NewsFilePath).ToList();
 
-        int removed = lines.RemoveAll(l => l.Trim() == url.Trim());
+//        int removed = lines.RemoveAll(l => l.Trim() == url.Trim());
 
-        if (removed > 0)
-        {
-            File.WriteAllLines(config.NewsFilePath, lines);
-            LogService.Info($"URL removida do arquivo: {url}");
-        }
-    }
-    catch (Exception ex)
-    {
-        LogService.Error($"Erro ao remover URL do arquivo: {url}", ex);
-    }
-}
+//        if (removed > 0)
+//        {
+//            File.WriteAllLines(config.NewsFilePath, lines);
+//            LogService.Info($"URL removida do arquivo: {url}");
+//        }
+//    }
+//    catch (Exception ex)
+//    {
+//        LogService.Error($"Erro ao remover URL do arquivo: {url}", ex);
+//    }
+//}
 
         private void btnOpenReport_Click(object sender, EventArgs e)
         {
@@ -693,6 +686,132 @@ namespace NewsImpactRanker.WinForms.Forms
             catch (Exception ex)
             {
                 LogService.Error("Erro ao abrir log", ex);
+            }
+        }
+
+        private async Task<NewsItem> ExecuteAiWithFailoverAsync(string rawText, AppConfig config)
+        {
+            string providerUsed = "Nenhum";
+            string jsonResponse = null;
+
+            // 1. Roteamento Dinâmico: Tentar Groq primeiro (se não estiver no castigo)
+            if (DateTime.Now >= _groqCooldownUntil)
+            {
+                try
+                {
+                    providerUsed = "Groq";
+                    // Chama o serviço da Groq com os novos parâmetros
+                    jsonResponse = await _groqService.ClassifyNewsAsync(rawText, config.GroqApiKey, config.GroqModel);
+                }
+                catch (Exception ex)
+                {
+                    // 2. Captura do Erro 429 (Rate Limit) ou Limites da Groq
+                    if (ex.Message.Contains("429") || ex.Message.Contains("Too Many Requests") || ex.Message.Contains("Limit"))
+                    {
+                        LogService.Warn("[GROQ LIMIT] Groq sobrecarregado! Acionando Gemini de emergência...");
+
+                        // Coloca o Groq de castigo por 40 segundos
+                        _groqCooldownUntil = DateTime.Now.AddSeconds(40);
+
+                        providerUsed = "Gemini (Fallback 429)";
+                        jsonResponse = null; // Garante queda para o bloco do Gemini
+                    }
+                    else
+                    {
+                        LogService.Warn($"Erro inesperado no Groq: {ex.Message}. Tentando Gemini...");
+                        providerUsed = "Gemini (Fallback Erro)";
+                        jsonResponse = null;
+                    }
+                }
+            }
+            else
+            {
+                providerUsed = "Gemini (Groq em Cooldown)";
+            }
+
+            // 3. Fallback: Se não houve resposta (por erro ou cooldown), chama o Gemini
+            if (string.IsNullOrEmpty(jsonResponse))
+            {
+                try
+                {
+                    // Usa o novo _geminiService que instanciamos no construtor
+                    jsonResponse = await _geminiService.ClassifyNewsAsync(rawText, config.GeminiApiKey, config.Model);
+
+                    if (providerUsed == "Nenhum") providerUsed = "Gemini";
+                }
+                catch (Exception ex)
+                {
+                    LogService.Error($"[CRÍTICO] Falha total no Gemini: {ex.Message}");
+                    return null;
+                }
+            }
+
+            // 4. Processamento do Resultado via Parser Universal (Blindagem)
+            try
+            {
+                var newsResult = ParseUniversalJsonResponse(jsonResponse);
+
+                if (newsResult != null)
+                {
+                    // Incrementa contadores de sucesso para o relatório
+                    if (providerUsed.StartsWith("Groq")) _groqSuccessCount++;
+                    else _geminiSuccessCount++;
+
+                    LogService.Info($"[OK] ({providerUsed}) Notícia classificada com sucesso.");
+                    return newsResult;
+                }
+            }
+            catch (Exception ex)
+            {
+                LogService.Error($"Erro ao processar JSON da IA ({providerUsed}): {ex.Message}");
+            }
+
+            return null;
+        }
+
+
+        private NewsItem ParseUniversalJsonResponse(object iaData)
+        {
+            try
+            {
+                // Garante que é string
+                string textResult = iaData is string ? (string)iaData : Newtonsoft.Json.JsonConvert.SerializeObject(iaData);
+
+                // Limpeza de Markdown (conforme algoritmo chave do projeto)
+                int start = textResult.IndexOf('{');
+                int end = textResult.LastIndexOf('}');
+                if (start != -1 && end != -1)
+                {
+                    textResult = textResult.Substring(start, end - start + 1);
+                }
+
+                // Parse dinâmico JObject
+                var parsedData = Newtonsoft.Json.Linq.JObject.Parse(textResult);
+                var newsItem = new NewsItem();
+
+                // Busca ignorando Case Sensitive (Blindagem)
+                var tokenScore = parsedData.GetValue("impactScore", StringComparison.OrdinalIgnoreCase);
+                if (tokenScore != null)
+                {
+                    double rawScore = tokenScore.ToObject<double>();
+                    newsItem.ImpactScore = Math.Max(0.0, Math.Min(10.0, rawScore));
+                }
+                    // newsItem.ImpactScore = Math.Clamp(tokenScore.ToObject<double>(), 0.0, 10.0); // Clamp validado na documentação
+
+                var tokenCategory = parsedData.GetValue("category", StringComparison.OrdinalIgnoreCase);
+                if (tokenCategory != null)
+                    newsItem.Category = tokenCategory.ToString().Trim();
+
+                var tokenReason = parsedData.GetValue("impactReason", StringComparison.OrdinalIgnoreCase);
+                if (tokenReason != null)
+                    newsItem.ImpactReason = tokenReason.ToString().Trim();
+
+                return newsItem;
+            }
+            catch (Exception ex)
+            {
+                LogService.Error($"Falha no Parser Universal de JSON: {ex.Message}");
+                return null;
             }
         }
 

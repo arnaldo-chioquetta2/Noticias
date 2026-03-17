@@ -14,37 +14,52 @@ namespace NewsImpactRanker.WinForms.Forms
 
         private void ConfigForm_Load(object sender, EventArgs e)
         {
-            var config = StorageManager.LoadConfig();
+            AppConfig config = StorageManager.LoadConfig();
 
-            txtApiKey.Text = config.AiApiKey;
-            txtModel.Text = config.AiModel ?? "mixtral-8x7b-32768";
-            txtNewsFile.Text = config.NewsFilePath ?? "";
+            if (config != null)
+            {
+                // Campos do Gemini
+                txtApiKey.Text = config.GeminiApiKey;
+                txtModel.Text = config.Model;
+
+                // Campos do Groq que você adicionou
+                txApiGrog.Text = config.GroqApiKey;
+                txModeloGrog.Text = config.GroqModel;
+            }
         }
+
+        //private void ConfigForm_Load(object sender, EventArgs e)
+        //{
+        //    var config = StorageManager.LoadConfig();
+
+        //    txtApiKey.Text = config.AiApiKey;
+        //    txtModel.Text = config.AiModel ?? "mixtral-8x7b-32768";
+        //    txtNewsFile.Text = config.NewsFilePath ?? "";
+        //}
 
         private void btnSave_Click(object sender, EventArgs e)
         {
-            if (string.IsNullOrWhiteSpace(txtApiKey.Text))
+            AppConfig updatedConfig = new AppConfig
             {
-                MessageBox.Show("A chave da API não pode estar vazia.",
-                    "Erro",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Error);
-                return;
+                // Salva Gemini
+                GeminiApiKey = txtApiKey.Text.Trim(),
+                Model = txtModel.Text.Trim(),
+
+                // Salva Groq
+                GroqApiKey = txApiGrog.Text.Trim(),
+                GroqModel = txModeloGrog.Text.Trim()
+            };
+
+            try
+            {
+                StorageManager.SaveConfig(updatedConfig);
+                MessageBox.Show("Configurações das IAs salvas com sucesso!", "Sucesso", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                this.Close();
             }
-
-            var config = StorageManager.LoadConfig();
-
-            config.AiApiKey = txtApiKey.Text.Trim();
-            config.AiModel = string.IsNullOrWhiteSpace(txtModel.Text)
-                ? "mixtral-8x7b-32768"
-                : txtModel.Text.Trim();
-
-            config.NewsFilePath = txtNewsFile.Text?.Trim();
-
-            StorageManager.SaveConfig(config);
-
-            this.DialogResult = DialogResult.OK;
-            this.Close();
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Erro ao salvar configurações: {ex.Message}", "Erro", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
 
         private void btnCancel_Click(object sender, EventArgs e)
@@ -52,20 +67,21 @@ namespace NewsImpactRanker.WinForms.Forms
             this.DialogResult = DialogResult.Cancel;
             this.Close();
         }
-
-        private void btnBrowse_Click(object sender, EventArgs e)
-        {
-            using (var dialog = new OpenFileDialog())
-            {
-                dialog.Filter = "Arquivos de texto (*.txt)|*.txt";
-                dialog.Title = "Selecione o arquivo com as URLs";
-
-                if (dialog.ShowDialog() == DialogResult.OK)
-                {
-                    txtNewsFile.Text = dialog.FileName;
-                }
-            }
-        }
-
     }
+
+    //    private void btnBrowse_Click(object sender, EventArgs e)
+    //    {
+    //        using (var dialog = new OpenFileDialog())
+    //        {
+    //            dialog.Filter = "Arquivos de texto (*.txt)|*.txt";
+    //            dialog.Title = "Selecione o arquivo com as URLs";
+
+    //            if (dialog.ShowDialog() == DialogResult.OK)
+    //            {
+    //                txtNewsFile.Text = dialog.FileName;
+    //            }
+    //        }
+    //    }
+
+    //}
 }
