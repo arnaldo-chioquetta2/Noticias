@@ -10,7 +10,7 @@ namespace NewsImpactRanker.WinForms.Services
     {
         private static readonly HttpClient _httpClient = new HttpClient();
 
-        public async Task<string> ClassifyNewsAsync(string text, string apiKey, string modelName)
+        public async Task<string> ClassifyNewsAsync(string text, string apiKey, string modelName, string systemPrompt)
         {
             LogService.Info($"[GEMINI] 🧾 Texto p/ IA - len={text?.Length ?? 0}");
 
@@ -24,6 +24,9 @@ namespace NewsImpactRanker.WinForms.Services
             // Se o modelo não vier preenchido, usa o padrão do projeto
             string model = string.IsNullOrWhiteSpace(modelName) ? "gemini-2.5-flash" : modelName;
 
+            if (text.Length > 4000)
+                text = text.Substring(0, 4000);
+
             // Endpoint oficial do Google Generative AI
             string url = $"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={apiKey}";
 
@@ -33,7 +36,8 @@ namespace NewsImpactRanker.WinForms.Services
                 {
                     parts = new[]
                     {
-                        new { text = "You are a strict quantitative news impact classifier. Return ONLY a pure JSON object. Keys: impactScore (0-100), impactReason, category." }
+                        new { text = systemPrompt }
+                        // new { text = "You are a strict quantitative news impact classifier. Return ONLY a pure JSON object. Keys: impactScore (0-100), impactReason, category." }
                     }
                 },
                 contents = new[]

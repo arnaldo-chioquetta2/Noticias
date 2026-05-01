@@ -30,7 +30,10 @@ namespace NewsImpactRanker.WinForms.Forms
         private int _groqSuccessCount = 0;
         private int _geminiSuccessCount = 0;
         private readonly GeminiService _geminiService;
+        private static readonly object _scientificFileLock = new object();
 
+        // Objeto de bloqueio de uso exclusivo na memória para sincronização de threads
+        private static readonly object _fileLock = new object();
         public MainForm()
         {
             InitializeComponent();
@@ -310,11 +313,11 @@ namespace NewsImpactRanker.WinForms.Forms
             }
         }
 
+        // METHOD v2: ProcessSingleUrlAsync
         private async Task ProcessSingleUrlAsync(string url)
         {
             try
             {
-                // 0. Carregar configuração (Resolve o erro: O nome 'config' não existe)
                 var config = StorageManager.LoadConfig();
 
                 // 1. Scraping
@@ -323,15 +326,7 @@ namespace NewsImpactRanker.WinForms.Forms
                 // ✅ Rastrear falhas de scraping por domínio
                 if (item.Status != "Sucesso")
                 {
-                    string domain = ExtractDomain(url);
-                    lock (_failedDomainsLock)
-                    {
-                        if (!_failedDomains.Contains(domain))
-                        {
-                            _failedDomains.Add(domain);
-                            LogService.Warn($"Domínio adicionado à lista de falhas: {domain} (Status: {item.Status})");
-                        }
-                    }
+                    RegistrarFalhaDominio(url);
                 }
 
                 if (item.Status == "Sucesso")
@@ -340,6 +335,9 @@ namespace NewsImpactRanker.WinForms.Forms
                     var cached = CacheService.Get(url, item.TextHash);
                     if (cached != null)
                     {
+                        // Se a notícia em cache for científica, ignora e nem adiciona na grid
+                        if (cached.Category == "CIENCIA_REDIRECIONADA") return;
+
                         LogService.Info($"Usando cache para {url}");
                         AddOrUpdateGrid(cached);
                         return;
@@ -347,33 +345,45 @@ namespace NewsImpactRanker.WinForms.Forms
 
                     LogService.Info($"🧾 URL atual: {url}");
 
-                    // 3. Motor de IA - Load Balancing & Failover (Groq como principal, Gemini como sombra)
-                    // Não chamamos mais o _groqService diretamente aqui para permitir o fallback automático
+                    // 3. Motor de IA - Load Balancing & Failover
                     var analysis = await ExecuteAiWithFailoverAsync(item.RawText, config);
 
                     if (analysis != null)
                     {
-                        // ✅ Preencher dados da classificação vindos do orquestrador
+                        // ETAPA 4: Desvio de Fluxo (Usando o truque da Categoria do Parser)
+                        if (analysis.Category == "CIENCIA_REDIRECIONADA")
+                        {
+                            // Grava no arquivo de texto
+                            AppendScientificNews(url);
+
+                            // Salva no cache com a categoria correta para ser ignorada no futuro
+                            item.Category = "CIENCIA_REDIRECIONADA";
+                            item.Status = "Sucesso";
+                            CacheService.Save(item);
+
+                            // RETORNO ANTECIPADO: A notícia não desce para a Grid
+                            return;
+                        }
+
+                        // Fluxo Normal (Notícia Comum)
                         item.ImpactScore = analysis.ImpactScore;
                         item.ImpactReason = analysis.ImpactReason;
                         item.Category = analysis.Category;
                         item.Status = "Sucesso";
 
-                        // ✅ Salvar no cache para reutilização futura
+                        // Salvar no cache para reutilização futura
                         CacheService.Save(item);
 
                         LogService.Info($"Classificação concluída para {url}: Score={item.ImpactScore}, Categoria={item.Category}");
                     }
                     else
                     {
-                        // Se o orquestrador retornar null, significa que ambas as IAs falharam (ou rate limit total)
                         item.Status = "Erro IA Total";
                         LogService.Error($"Falha crítica: Groq e Gemini falharam para a URL {url}");
                     }
                 }
 
-                // ✅ Adicionar item ao DataGridView (sucesso ou falha)
-                // A Grid permanece intacta, aceitando o item independente do resultado
+                // ✅ Adicionar item ao DataGridView (sucesso normal ou erro de leitura/IA)
                 AddOrUpdateGrid(item);
             }
             catch (Exception ex) when (ex.Message.Contains("conjunto de caracteres") || ex.Message.Contains("charset"))
@@ -389,6 +399,7 @@ namespace NewsImpactRanker.WinForms.Forms
                 AddOrUpdateGrid(new NewsItem { Url = url, Status = "Erro", ProcessedAt = DateTime.Now });
             }
         }
+
 
         // Método auxiliar para evitar repetição de código no rastreamento de falhas
         private void RegistrarFalhaDominio(string url)
@@ -694,6 +705,8 @@ namespace NewsImpactRanker.WinForms.Forms
             string providerUsed = "Nenhum";
             string jsonResponse = null;
 
+            string systemPrompt = File.ReadAllText(config.PromptFilePath);
+
             // 1. Roteamento Dinâmico: Tentar Groq primeiro (se não estiver no castigo)
             if (DateTime.Now >= _groqCooldownUntil)
             {
@@ -701,7 +714,7 @@ namespace NewsImpactRanker.WinForms.Forms
                 {
                     providerUsed = "Groq";
                     // Chama o serviço da Groq com os novos parâmetros
-                    jsonResponse = await _groqService.ClassifyNewsAsync(rawText, config.GroqApiKey, config.GroqModel);
+                    jsonResponse = await _groqService.ClassifyNewsAsync(rawText, config.GroqApiKey, config.GroqModel, systemPrompt);
                 }
                 catch (Exception ex)
                 {
@@ -735,7 +748,7 @@ namespace NewsImpactRanker.WinForms.Forms
                 try
                 {
                     // Usa o novo _geminiService que instanciamos no construtor
-                    jsonResponse = await _geminiService.ClassifyNewsAsync(rawText, config.GeminiApiKey, config.Model);
+                    jsonResponse = await _geminiService.ClassifyNewsAsync(rawText, config.GeminiApiKey, config.Model, systemPrompt);
 
                     if (providerUsed == "Nenhum") providerUsed = "Gemini";
                 }
@@ -769,7 +782,6 @@ namespace NewsImpactRanker.WinForms.Forms
             return null;
         }
 
-
         private NewsItem ParseUniversalJsonResponse(object iaData)
         {
             try
@@ -777,7 +789,7 @@ namespace NewsImpactRanker.WinForms.Forms
                 // Garante que é string
                 string textResult = iaData is string ? (string)iaData : Newtonsoft.Json.JsonConvert.SerializeObject(iaData);
 
-                // Limpeza de Markdown (conforme algoritmo chave do projeto)
+                // Limpeza de Markdown (conforme algoritmo chave do projeto)[cite: 1]
                 int start = textResult.IndexOf('{');
                 int end = textResult.LastIndexOf('}');
                 if (start != -1 && end != -1)
@@ -789,6 +801,18 @@ namespace NewsImpactRanker.WinForms.Forms
                 var parsedData = Newtonsoft.Json.Linq.JObject.Parse(textResult);
                 var newsItem = new NewsItem();
 
+                // --- VERIFICAÇÃO DE CONTEÚDO CIENTÍFICO ---
+                // Busca a chave 'isScientific' ignorando Case Sensitive (Blindagem)
+                var tokenScientific = parsedData.GetValue("isScientific", StringComparison.OrdinalIgnoreCase);
+                if (tokenScientific != null && tokenScientific.ToObject<bool>())
+                {
+                    // Marca a notícia internamente para não ir para a Grid e ser gravada no TXT
+                    newsItem.Category = "CIENCIA_REDIRECIONADA";
+                    newsItem.Status = "Sucesso";
+                    return newsItem;
+                }
+
+                // --- PROCESSAMENTO NORMAL ---
                 // Busca ignorando Case Sensitive (Blindagem)
                 var tokenScore = parsedData.GetValue("impactScore", StringComparison.OrdinalIgnoreCase);
                 if (tokenScore != null)
@@ -796,7 +820,6 @@ namespace NewsImpactRanker.WinForms.Forms
                     double rawScore = tokenScore.ToObject<double>();
                     newsItem.ImpactScore = Math.Max(0.0, Math.Min(10.0, rawScore));
                 }
-                    // newsItem.ImpactScore = Math.Clamp(tokenScore.ToObject<double>(), 0.0, 10.0); // Clamp validado na documentação
 
                 var tokenCategory = parsedData.GetValue("category", StringComparison.OrdinalIgnoreCase);
                 if (tokenCategory != null)
@@ -812,6 +835,62 @@ namespace NewsImpactRanker.WinForms.Forms
             {
                 LogService.Error($"Falha no Parser Universal de JSON: {ex.Message}");
                 return null;
+            }
+        }
+
+        // METHOD v1: AppendScientificNews
+        private void AppendScientificNews(string url)
+        {
+            // 1. Obter o caminho do arquivo configurado no config.json
+            var config = StorageManager.LoadConfig();
+            string path = config.ScientificNewsFilePath;
+
+            if (string.IsNullOrEmpty(path))
+            {
+                LogService.Warn("Caminho para notícias científicas não configurado.");
+                return;
+            }
+
+            // Formatação da data atual para o padrão dd/MM (ex: 26/04)
+            string todayHeader = DateTime.Now.ToString("dd/MM");
+
+            // 2. Bloco de proteção (Thread-Safety)
+            lock (_fileLock)
+            {
+                try
+                {
+                    bool dateHeaderExists = false;
+
+                    // 3. Verificar se a data já existe no arquivo
+                    if (File.Exists(path))
+                    {
+                        var currentLines = File.ReadAllLines(path);
+                        dateHeaderExists = currentLines.Any(line => line.Trim() == todayHeader);
+                    }
+
+                    // 4. Escrita no arquivo
+                    using (StreamWriter sw = new StreamWriter(path, true))
+                    {
+                        if (!dateHeaderExists)
+                        {
+                            // Se o arquivo já tiver conteúdo, adiciona uma quebra antes do novo bloco
+                            if (new FileInfo(path).Length > 0) sw.WriteLine();
+
+                            // Escreve a data e a linha em branco obrigatória
+                            sw.WriteLine(todayHeader);
+                            sw.WriteLine();
+                        }
+
+                        // Escreve a URL detectada
+                        sw.WriteLine(url);
+                    }
+
+                    LogService.Info($"URL científica gravada com sucesso em: {path}");
+                }
+                catch (Exception ex)
+                {
+                    LogService.Error("Erro ao gravar notícia científica no arquivo.", ex);
+                }
             }
         }
 

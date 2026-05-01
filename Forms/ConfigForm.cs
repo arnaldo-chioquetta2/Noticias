@@ -1,4 +1,4 @@
-using System;
+    using System;
 using System.Windows.Forms;
 using NewsImpactRanker.WinForms.Models;
 using NewsImpactRanker.WinForms.Storage;
@@ -25,17 +25,10 @@ namespace NewsImpactRanker.WinForms.Forms
                 // Campos do Groq que você adicionou
                 txApiGrog.Text = config.GroqApiKey;
                 txModeloGrog.Text = config.GroqModel;
+                txtPromptPath.Text = config.PromptFilePath;
+                txtScientificPath.Text = config.ScientificNewsFilePath;
             }
-        }
-
-        //private void ConfigForm_Load(object sender, EventArgs e)
-        //{
-        //    var config = StorageManager.LoadConfig();
-
-        //    txtApiKey.Text = config.AiApiKey;
-        //    txtModel.Text = config.AiModel ?? "mixtral-8x7b-32768";
-        //    txtNewsFile.Text = config.NewsFilePath ?? "";
-        //}
+        }        
 
         private void btnSave_Click(object sender, EventArgs e)
         {
@@ -52,6 +45,11 @@ namespace NewsImpactRanker.WinForms.Forms
 
             try
             {
+                updatedConfig.ScientificNewsFilePath = txtScientificPath.Text;
+                updatedConfig.PromptFilePath = txtPromptPath.Text;
+
+                updatedConfig.ScientificNewsFilePath = txtScientificPath.Text.Trim();
+
                 StorageManager.SaveConfig(updatedConfig);
                 MessageBox.Show("Configurações das IAs salvas com sucesso!", "Sucesso", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 this.Close();
@@ -67,21 +65,39 @@ namespace NewsImpactRanker.WinForms.Forms
             this.DialogResult = DialogResult.Cancel;
             this.Close();
         }
+
+        private void btnBrowseScientific_Click(object sender, EventArgs e)
+        {
+            using (SaveFileDialog sfd = new SaveFileDialog())
+            {
+                sfd.Title = "Definir Arquivo de Notícias Científicas";
+                sfd.Filter = "Arquivos de Texto (*.txt)|*.txt";
+                sfd.DefaultExt = "txt";
+
+                // Desativa a mensagem chata perguntando se deseja substituir o arquivo
+                sfd.OverwritePrompt = false;
+
+                if (sfd.ShowDialog() == DialogResult.OK)
+                {
+                    txtScientificPath.Text = sfd.FileName;
+                }
+            }
+        }
+
+        private void btnBrowsePrompt_Click(object sender, EventArgs e)
+        {
+            using (OpenFileDialog ofd = new OpenFileDialog())
+            {
+                ofd.Title = "Selecionar Ficheiro de Prompt";
+                ofd.Filter = "Ficheiros de Texto (*.txt)|*.txt|Todos os ficheiros (*.*)|*.*";
+
+                if (ofd.ShowDialog() == DialogResult.OK)
+                {
+                    txtPromptPath.Text = ofd.FileName;
+                }
+            }
+        }
+
     }
 
-    //    private void btnBrowse_Click(object sender, EventArgs e)
-    //    {
-    //        using (var dialog = new OpenFileDialog())
-    //        {
-    //            dialog.Filter = "Arquivos de texto (*.txt)|*.txt";
-    //            dialog.Title = "Selecione o arquivo com as URLs";
-
-    //            if (dialog.ShowDialog() == DialogResult.OK)
-    //            {
-    //                txtNewsFile.Text = dialog.FileName;
-    //            }
-    //        }
-    //    }
-
-    //}
 }

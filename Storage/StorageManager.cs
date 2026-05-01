@@ -1,7 +1,7 @@
+using NewsImpactRanker.WinForms.Models;
+using Newtonsoft.Json;
 using System;
 using System.IO;
-using Newtonsoft.Json;
-using NewsImpactRanker.WinForms.Models;
 
 namespace NewsImpactRanker.WinForms.Storage
 {
@@ -38,8 +38,10 @@ namespace NewsImpactRanker.WinForms.Storage
 
         public static void SaveConfig(AppConfig config)
         {
+            // Usa o Newtonsoft.Json para converter o objeto em texto formatado (identado)
             string json = JsonConvert.SerializeObject(config, Formatting.Indented);
             File.WriteAllText(ConfigPath, json);
         }
+
     }
 }

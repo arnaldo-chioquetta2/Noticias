@@ -9,7 +9,7 @@ namespace NewsImpactRanker.WinForms.Services
     public class GroqService
     {
         // Método principal de classificação
-        public async Task<string> ClassifyNewsAsync(string text, string apiKey, string modelName)
+        public async Task<string> ClassifyNewsAsync(string text, string apiKey, string modelName, string systemPrompt)
         {
             LogService.Info($"[GROQ] 🧾 Texto p/ IA - len={text?.Length ?? 0}");
 
@@ -33,21 +33,7 @@ namespace NewsImpactRanker.WinForms.Services
                 {
                     new {
                         role = "system",
-                        content =
-                        "You are a strict quantitative news impact classifier.\n\n" +
-                        "Use this scoring scale strictly:\n" +
-                        "0–20 = trivial/local news\n" +
-                        "21–40 = minor update or small incremental research\n" +
-                        "41–60 = moderate impact within a specific field\n" +
-                        "61–75 = strong impact in scientific or economic community\n" +
-                        "76–85 = major breakthrough or significant global relevance\n" +
-                        "86–95 = paradigm-shifting discovery or major global consequence\n" +
-                        "96–100 = historic, civilization-level impact\n\n" +
-                        "IMPORTANT RULES:\n" +
-                        "- Do NOT default to 80.\n" +
-                        "- Use the full range realistically.\n" +
-                        "- Score must match the justification logically.\n" +
-                        "- Return ONLY a valid JSON object."
+                        content = systemPrompt,
                     },
                     new {
                         role = "user",
